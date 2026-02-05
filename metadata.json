@@ -1,0 +1,6 @@
+{
+  "name": "PlanAI - Intelligent Project Architect",
+  "short_name": "PlanAI",
+  "description": "An AI-powered project management assistant that transforms high-level goals into actionable, structured roadmaps.",
+  "requestFramePermissions": []
+}

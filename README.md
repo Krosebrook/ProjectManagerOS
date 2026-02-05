@@ -1,11 +1,19 @@
-<div align="center">
+# PlanAI - Intelligent Project Architect
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+PlanAI is a production-grade PWA that uses Google's Gemini AI to transform high-level goals into structured, actionable project roadmaps.
 
-  <h1>Built with AI Studio</h2>
+## Features
+- 🚀 **AI Roadmaps**: Instant phase and task breakdown.
+- 📱 **PWA Ready**: Installable on iOS, Android, and Desktop.
+- 📶 **Offline Browsing**: View saved projects without internet.
+- 🔒 **Privacy Focused**: Local storage for your plans.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Local Development
+1. Set `API_KEY` in your environment.
+2. Serve the root directory using a local web server (e.g., `npx serve .`).
+3. Open `http://localhost:3000`.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>
+## Documentation
+- [PWA Strategy](./PWA.md)
+- [Security Guidelines](./SECURITY.md)
+- [Deployment Targets](./DEPLOYMENT.md)
