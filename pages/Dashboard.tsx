@@ -50,22 +50,22 @@ const Dashboard: React.FC = () => {
         </Link>
       </div>
 
-      {/* Search Bar - Staff UI Refactor */}
+      {/* Search Bar */}
       <div className="relative group max-w-2xl">
         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
           <Search className="text-slate-400 group-focus-within:text-blue-500 transition-colors" size={20} />
         </div>
         <input
           type="text"
-          placeholder="Search by title or goal..."
+          placeholder="Search projects by title or goal..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="block w-full pl-11 pr-12 py-3.5 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none text-slate-900 placeholder:text-slate-400"
+          className="block w-full pl-11 pr-12 py-3.5 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none text-slate-900 placeholder:text-slate-400 shadow-sm"
         />
         {searchQuery && (
           <button 
             onClick={() => setSearchQuery('')}
-            className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600"
+            className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
           >
             <X size={18} />
           </button>
@@ -94,7 +94,7 @@ const Dashboard: React.FC = () => {
             onClick={() => setSearchQuery('')}
             className="mt-4 text-blue-600 font-medium hover:underline"
           >
-            Clear all filters
+            Clear filters
           </button>
         </div>
       ) : (
@@ -136,9 +136,6 @@ const Dashboard: React.FC = () => {
                   <ChevronRight size={18} />
                 </div>
               </div>
-              
-              {/* Subtle background decoration */}
-              <div className="absolute top-0 right-0 -mr-8 -mt-8 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl group-hover:bg-blue-500/10 transition-colors"></div>
             </Link>
           ))}
         </div>

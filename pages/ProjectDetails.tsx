@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Project, Phase, Task, Priority } from '../types';
-import { ArrowLeft, Calendar, CheckCircle2, Circle, AlertTriangle, Edit3, Filter, X, Save } from 'lucide-react';
+import { ArrowLeft, Calendar, CheckCircle2, Circle, AlertTriangle, Edit3, Filter, X, Save, GripVertical, Plus, Trash2 } from 'lucide-react';
 import Button from '../components/Button';
 
 const ProjectDetails: React.FC = () => {
@@ -16,6 +16,14 @@ const ProjectDetails: React.FC = () => {
   // Editing states
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ title: '', summary: '', goal: '' });
+
+  // Adding Task State
+  const [addingTaskPhaseId, setAddingTaskPhaseId] = useState<string | null>(null);
+  const [newTaskForm, setNewTaskForm] = useState({ title: '', estimate: '', priority: Priority.MEDIUM });
+
+  // DnD Refs
+  const dragItem = useRef<{ phaseIndex: number; taskIndex: number } | null>(null);
+  const dragOverItem = useRef<{ phaseIndex: number; taskIndex: number } | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('planai_projects');
@@ -40,7 +48,6 @@ const ProjectDetails: React.FC = () => {
 
   const toggleTask = (phaseId: string, taskId: string) => {
     if (!project) return;
-
     const updatedPhases = project.phases.map(p => {
       if (p.id !== phaseId) return p;
       return {
@@ -51,7 +58,6 @@ const ProjectDetails: React.FC = () => {
         })
       };
     });
-
     saveProjectToStore({ ...project, phases: updatedPhases });
   };
 
@@ -63,6 +69,77 @@ const ProjectDetails: React.FC = () => {
     setIsEditing(false);
   };
 
+  // Drag and Drop Logic
+  const handleDragStart = (phaseIndex: number, taskIndex: number) => {
+    dragItem.current = { phaseIndex, taskIndex };
+  };
+
+  const handleDragEnter = (phaseIndex: number, taskIndex: number) => {
+    dragOverItem.current = { phaseIndex, taskIndex };
+  };
+
+  const handleDragEnd = () => {
+    if (!project || !dragItem.current || !dragOverItem.current) {
+      dragItem.current = null;
+      dragOverItem.current = null;
+      return;
+    }
+
+    const sourcePhaseIdx = dragItem.current.phaseIndex;
+    const sourceTaskIdx = dragItem.current.taskIndex;
+    const destPhaseIdx = dragOverItem.current.phaseIndex;
+    const destTaskIdx = dragOverItem.current.taskIndex;
+
+    if (sourcePhaseIdx === destPhaseIdx) {
+      // Reorder within same phase
+      const newPhases = [...project.phases];
+      const phase = newPhases[sourcePhaseIdx];
+      const newTasks = [...phase.tasks];
+      
+      const [draggedTask] = newTasks.splice(sourceTaskIdx, 1);
+      newTasks.splice(destTaskIdx, 0, draggedTask);
+      
+      newPhases[sourcePhaseIdx] = { ...phase, tasks: newTasks };
+      saveProjectToStore({ ...project, phases: newPhases });
+    }
+
+    dragItem.current = null;
+    dragOverItem.current = null;
+  };
+
+  // Add Task Logic
+  const handleAddTask = (phaseId: string) => {
+    if (!project || !newTaskForm.title.trim()) return;
+    
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      title: newTaskForm.title,
+      description: 'Manually added task',
+      estimate: newTaskForm.estimate || '1 day',
+      priority: newTaskForm.priority,
+      completed: false
+    };
+
+    const updatedPhases = project.phases.map(p => {
+      if (p.id !== phaseId) return p;
+      return { ...p, tasks: [...p.tasks, newTask] };
+    });
+
+    saveProjectToStore({ ...project, phases: updatedPhases });
+    setAddingTaskPhaseId(null);
+    setNewTaskForm({ title: '', estimate: '', priority: Priority.MEDIUM });
+  };
+
+  const deleteTask = (phaseId: string, taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!project || !window.confirm("Delete this task?")) return;
+    const updatedPhases = project.phases.map(p => {
+      if (p.id !== phaseId) return p;
+      return { ...p, tasks: p.tasks.filter(t => t.id !== taskId) };
+    });
+    saveProjectToStore({ ...project, phases: updatedPhases });
+  };
+
   const stats = useMemo(() => {
     if (!project) return { total: 0, completed: 0, progress: 0 };
     const total = project.phases.reduce((acc, p) => acc + p.tasks.length, 0);
@@ -71,19 +148,9 @@ const ProjectDetails: React.FC = () => {
     return { total, completed, progress };
   }, [project]);
 
-  const filteredPhases = useMemo(() => {
-    if (!project) return [];
-    return project.phases.map(phase => ({
-      ...phase,
-      tasks: phase.tasks.filter(task => {
-        const priorityMatch = filterPriority === 'All' || task.priority === filterPriority;
-        const statusMatch = filterStatus === 'All' || 
-          (filterStatus === 'Completed' && task.completed) || 
-          (filterStatus === 'Pending' && !task.completed);
-        return priorityMatch && statusMatch;
-      })
-    })).filter(phase => phase.tasks.length > 0);
-  }, [project, filterPriority, filterStatus]);
+  // Apply filters visually but keep structure for DnD
+  // Note: DnD is disabled when filters are active to prevent index confusion
+  const isFiltered = filterPriority !== 'All' || filterStatus !== 'All';
 
   if (!project) return null;
 
@@ -129,7 +196,7 @@ const ProjectDetails: React.FC = () => {
             </div>
           </div>
 
-          {/* Advanced Filtering Control Panel */}
+          {/* Controls Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 py-5 px-6 bg-slate-50/50 rounded-2xl border border-slate-100">
             <div className="flex items-center gap-2.5 text-slate-900 font-bold text-sm">
               <Filter size={18} className="text-blue-500" /> Filter Tasks
@@ -171,7 +238,7 @@ const ProjectDetails: React.FC = () => {
               </div>
             </div>
 
-            {(filterPriority !== 'All' || filterStatus !== 'All') && (
+            {isFiltered && (
               <button 
                 onClick={() => { setFilterPriority('All'); setFilterStatus('All'); }}
                 className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 sm:ml-auto transition-colors"
@@ -185,18 +252,23 @@ const ProjectDetails: React.FC = () => {
         <div className="p-8 md:p-10 pt-0">
           <div className="grid lg:grid-cols-12 gap-10">
             <div className="lg:col-span-8 space-y-12">
-              {filteredPhases.length === 0 ? (
-                <div className="text-center py-24 bg-slate-50/50 rounded-3xl border border-dashed border-slate-200">
-                  <div className="text-slate-300 mb-4"><Filter size={48} strokeWidth={1} className="mx-auto" /></div>
-                  <h4 className="text-lg font-bold text-slate-800">No matching tasks</h4>
-                  <p className="text-slate-500">Adjust your filters to see more of the roadmap.</p>
-                </div>
-              ) : (
-                filteredPhases.map((phase) => (
+              {project.phases.map((phase, phaseIndex) => {
+                // Filter logic
+                const visibleTasks = phase.tasks.filter(task => {
+                  const priorityMatch = filterPriority === 'All' || task.priority === filterPriority;
+                  const statusMatch = filterStatus === 'All' || 
+                    (filterStatus === 'Completed' && task.completed) || 
+                    (filterStatus === 'Pending' && !task.completed);
+                  return priorityMatch && statusMatch;
+                });
+
+                if (visibleTasks.length === 0 && isFiltered) return null;
+
+                return (
                   <div key={phase.id} className="relative">
                     <div className="flex items-center gap-4 mb-8">
                       <div className="flex-none h-10 w-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-lg shadow-lg shadow-blue-200">
-                        {project.phases.findIndex(p => p.id === phase.id) + 1}
+                        {phaseIndex + 1}
                       </div>
                       <div>
                         <h2 className="text-2xl font-black text-slate-900 leading-tight">{phase.name}</h2>
@@ -205,40 +277,46 @@ const ProjectDetails: React.FC = () => {
                     </div>
                     
                     <div className="grid gap-4">
-                      {phase.tasks.map((task) => (
+                      {visibleTasks.map((task, taskIndex) => (
                         <div 
                           key={task.id}
+                          draggable={!isFiltered}
+                          onDragStart={() => handleDragStart(phaseIndex, phase.tasks.indexOf(task))}
+                          onDragEnter={() => handleDragEnter(phaseIndex, phase.tasks.indexOf(task))}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => e.preventDefault()}
                           onClick={() => toggleTask(phase.id, task.id)}
                           className={`
-                            group p-5 rounded-2xl border transition-all duration-300 cursor-pointer flex items-start gap-5 relative overflow-hidden
+                            group p-5 rounded-2xl border transition-all duration-300 cursor-pointer flex items-center gap-5 relative overflow-hidden select-none
                             ${task.completed 
-                              ? 'bg-slate-50 border-slate-100' 
+                              ? 'bg-slate-50 border-slate-100 opacity-75' 
                               : 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-xl hover:-translate-y-0.5'}
                           `}
                         >
-                          {/* Animated Background Overlay */}
-                          <div className={`absolute inset-0 bg-blue-600/5 transition-transform duration-700 origin-left ease-in-out pointer-events-none ${task.completed ? 'scale-x-100' : 'scale-x-0'}`} />
-                          
+                          {!isFiltered && (
+                            <div className="text-slate-300 cursor-grab active:cursor-grabbing hover:text-blue-400">
+                              <GripVertical size={16} />
+                            </div>
+                          )}
+
                           <div className="relative z-10 flex-none pt-0.5">
                             <div className={`
-                              w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-500
+                              w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300
                               ${task.completed 
                                 ? 'bg-blue-600 border-blue-600 scale-110 shadow-lg shadow-blue-200' 
                                 : 'bg-white border-slate-300 group-hover:border-blue-400'}
                             `}>
-                              {task.completed && (
-                                <CheckCircle2 size={16} className="text-white animate-in zoom-in-50 duration-500" />
-                              )}
+                              <CheckCircle2 size={14} className={`text-white transition-all duration-300 ${task.completed ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`} />
                             </div>
                           </div>
 
-                          <div className="relative z-10 flex-1">
-                            <h4 className={`text-base font-bold transition-all duration-500 ${task.completed ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
+                          <div className="relative z-10 flex-1 min-w-0">
+                            <h4 className={`text-base font-bold transition-all duration-300 truncate ${task.completed ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
                               {task.title}
                             </h4>
-                            <p className={`text-sm mt-1 transition-colors duration-500 ${task.completed ? 'text-slate-400' : 'text-slate-600'}`}>{task.description}</p>
+                            <p className={`text-sm mt-1 transition-colors duration-300 truncate ${task.completed ? 'text-slate-400' : 'text-slate-600'}`}>{task.description}</p>
                             
-                            <div className="flex items-center gap-4 mt-4">
+                            <div className="flex items-center gap-4 mt-3">
                                <span className={`text-[10px] px-2.5 py-1 rounded-lg font-black uppercase tracking-widest ${
                                   task.priority === 'High' ? 'bg-red-100 text-red-700' :
                                   task.priority === 'Medium' ? 'bg-amber-100 text-amber-700' :
@@ -251,12 +329,77 @@ const ProjectDetails: React.FC = () => {
                               </span>
                             </div>
                           </div>
+                          
+                           <button 
+                            onClick={(e) => deleteTask(phase.id, task.id, e)}
+                            className="p-2 text-slate-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                            title="Delete task"
+                          >
+                            <Trash2 size={18} />
+                          </button>
                         </div>
                       ))}
+
+                      {/* Add Task Area */}
+                      {!isFiltered && (
+                         <div className="mt-2">
+                           {addingTaskPhaseId === phase.id ? (
+                             <div className="bg-slate-50 border border-blue-200 rounded-2xl p-4 animate-in fade-in zoom-in-95 duration-200">
+                               <div className="flex gap-3 mb-3">
+                                 <input 
+                                   autoFocus
+                                   placeholder="Task title..."
+                                   className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                                   value={newTaskForm.title}
+                                   onChange={e => setNewTaskForm({...newTaskForm, title: e.target.value})}
+                                 />
+                                 <input 
+                                   placeholder="Est (e.g. 2h)"
+                                   className="w-24 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                   value={newTaskForm.estimate}
+                                   onChange={e => setNewTaskForm({...newTaskForm, estimate: e.target.value})}
+                                 />
+                               </div>
+                               <div className="flex items-center justify-between">
+                                 <select 
+                                   className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                                   value={newTaskForm.priority}
+                                   onChange={e => setNewTaskForm({...newTaskForm, priority: e.target.value as Priority})}
+                                 >
+                                   <option value={Priority.HIGH}>High Priority</option>
+                                   <option value={Priority.MEDIUM}>Medium Priority</option>
+                                   <option value={Priority.LOW}>Low Priority</option>
+                                 </select>
+                                 <div className="flex gap-2">
+                                   <button 
+                                     onClick={() => setAddingTaskPhaseId(null)}
+                                     className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-200 rounded-lg"
+                                   >
+                                     Cancel
+                                   </button>
+                                   <button 
+                                     onClick={() => handleAddTask(phase.id)}
+                                     className="px-4 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm"
+                                   >
+                                     Save Task
+                                   </button>
+                                 </div>
+                               </div>
+                             </div>
+                           ) : (
+                             <button 
+                               onClick={() => setAddingTaskPhaseId(phase.id)}
+                               className="w-full py-3 border-2 border-dashed border-slate-200 hover:border-blue-400 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-2xl transition-all flex items-center justify-center gap-2 text-sm font-bold"
+                             >
+                               <Plus size={16} /> Add Task
+                             </button>
+                           )}
+                         </div>
+                      )}
                     </div>
                   </div>
-                ))
-              )}
+                );
+              })}
             </div>
 
             <div className="lg:col-span-4 space-y-8">
@@ -283,7 +426,7 @@ const ProjectDetails: React.FC = () => {
         </div>
       </div>
 
-      {/* Edit Modal - Staff Implementation */}
+      {/* Edit Modal */}
       {isEditing && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white rounded-[32px] shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-10 duration-500">
