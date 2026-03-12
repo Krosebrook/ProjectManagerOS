@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Project, Phase, Task, Priority } from '../types';
-import { ArrowLeft, Calendar, CheckCircle2, Circle, AlertTriangle, Edit3, Filter, X, Save, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { Project, Phase, Task, Priority, Risk } from '../types';
+import { ArrowLeft, Calendar, CheckCircle2, Circle, AlertTriangle, Edit3, Filter, X, Save, GripVertical, Plus, Trash2, Link as LinkIcon, Lock } from 'lucide-react';
 import Button from '../components/Button';
 
 const ProjectDetails: React.FC = () => {
@@ -20,6 +20,21 @@ const ProjectDetails: React.FC = () => {
   // Adding Task State
   const [addingTaskPhaseId, setAddingTaskPhaseId] = useState<string | null>(null);
   const [newTaskForm, setNewTaskForm] = useState({ title: '', estimate: '', priority: Priority.MEDIUM });
+
+  // Adding Risk State
+  const [addingRisk, setAddingRisk] = useState(false);
+  const [newRiskForm, setNewRiskForm] = useState<Partial<Risk>>({
+    description: '',
+    severity: 'Medium',
+    likelihood: 'Medium',
+    mitigation: ''
+  });
+
+  // Editing Task State
+  const [editingTask, setEditingTask] = useState<{ phaseId: string, task: Task } | null>(null);
+
+  // Dependency Graph State
+  const [showDependencyGraph, setShowDependencyGraph] = useState(false);
 
   // DnD Refs
   const dragItem = useRef<{ phaseIndex: number; taskIndex: number } | null>(null);
@@ -46,8 +61,30 @@ const ProjectDetails: React.FC = () => {
     setProject(updatedProject);
   };
 
+  const allTasks = useMemo(() => {
+    if (!project) return [];
+    return project.phases.flatMap(p => p.tasks);
+  }, [project]);
+
+  const isTaskBlocked = (task: Task) => {
+    if (!task.dependencies || task.dependencies.length === 0) return false;
+    return task.dependencies.some(depId => {
+      const depTask = allTasks.find(t => t.id === depId);
+      return depTask && !depTask.completed;
+    });
+  };
+
   const toggleTask = (phaseId: string, taskId: string) => {
     if (!project) return;
+    
+    // Check if task is blocked
+    const phase = project.phases.find(p => p.id === phaseId);
+    const task = phase?.tasks.find(t => t.id === taskId);
+    if (task && !task.completed && isTaskBlocked(task)) {
+      alert("This task cannot be completed until all its dependencies are met.");
+      return;
+    }
+
     const updatedPhases = project.phases.map(p => {
       if (p.id !== phaseId) return p;
       return {
@@ -101,6 +138,21 @@ const ProjectDetails: React.FC = () => {
       
       newPhases[sourcePhaseIdx] = { ...phase, tasks: newTasks };
       saveProjectToStore({ ...project, phases: newPhases });
+    } else {
+      // Move across phases
+      const newPhases = [...project.phases];
+      const sourcePhase = newPhases[sourcePhaseIdx];
+      const destPhase = newPhases[destPhaseIdx];
+      
+      const sourceTasks = [...sourcePhase.tasks];
+      const destTasks = [...destPhase.tasks];
+      
+      const [draggedTask] = sourceTasks.splice(sourceTaskIdx, 1);
+      destTasks.splice(destTaskIdx, 0, draggedTask);
+      
+      newPhases[sourcePhaseIdx] = { ...sourcePhase, tasks: sourceTasks };
+      newPhases[destPhaseIdx] = { ...destPhase, tasks: destTasks };
+      saveProjectToStore({ ...project, phases: newPhases });
     }
 
     dragItem.current = null;
@@ -128,6 +180,22 @@ const ProjectDetails: React.FC = () => {
     saveProjectToStore({ ...project, phases: updatedPhases });
     setAddingTaskPhaseId(null);
     setNewTaskForm({ title: '', estimate: '', priority: Priority.MEDIUM });
+  };
+
+  const handleAddRisk = () => {
+    if (!project || !newRiskForm.description?.trim()) return;
+    
+    const newRisk: Risk = {
+      id: `risk-${Date.now()}`,
+      description: newRiskForm.description,
+      severity: newRiskForm.severity as any || 'Medium',
+      likelihood: newRiskForm.likelihood as any || 'Medium',
+      mitigation: newRiskForm.mitigation || ''
+    };
+
+    saveProjectToStore({ ...project, risks: [...project.risks, newRisk] });
+    setAddingRisk(false);
+    setNewRiskForm({ description: '', severity: 'Medium', likelihood: 'Medium', mitigation: '' });
   };
 
   const deleteTask = (phaseId: string, taskId: string, e: React.MouseEvent) => {
@@ -167,13 +235,22 @@ const ProjectDetails: React.FC = () => {
             <div className="flex-1">
               <div className="flex items-center gap-4 mb-4">
                 <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">{project.title}</h1>
-                <button 
-                  onClick={() => setIsEditing(true)}
-                  className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all border border-transparent hover:border-blue-100"
-                  title="Edit project details"
-                >
-                  <Edit3 size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setIsEditing(true)}
+                    className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all border border-transparent hover:border-blue-100"
+                    title="Edit project details"
+                  >
+                    <Edit3 size={20} />
+                  </button>
+                  <button 
+                    onClick={() => setShowDependencyGraph(true)}
+                    className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all border border-transparent hover:border-blue-100"
+                    title="View Dependency Graph"
+                  >
+                    <LinkIcon size={20} />
+                  </button>
+                </div>
               </div>
               <p className="text-lg text-slate-600 max-w-3xl leading-relaxed">{project.summary}</p>
             </div>
@@ -194,64 +271,74 @@ const ProjectDetails: React.FC = () => {
                  <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-bold uppercase tracking-tighter">Live</span>
                </div>
             </div>
-          </div>
-
-          {/* Controls Bar */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 py-5 px-6 bg-slate-50/50 rounded-2xl border border-slate-100">
-            <div className="flex items-center gap-2.5 text-slate-900 font-bold text-sm">
-              <Filter size={18} className="text-blue-500" /> Filter Tasks
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-6">
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Priority</span>
-                <div className="flex bg-white rounded-xl border border-slate-200 p-1 shadow-sm">
-                  {['All', 'High', 'Medium', 'Low'].map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setFilterPriority(p as any)}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        filterPriority === p ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</span>
-                <div className="flex bg-white rounded-xl border border-slate-200 p-1 shadow-sm">
-                  {['All', 'Pending', 'Completed'].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setFilterStatus(s as any)}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        filterStatus === s ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {isFiltered && (
-              <button 
-                onClick={() => { setFilterPriority('All'); setFilterStatus('All'); }}
-                className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 sm:ml-auto transition-colors"
-              >
-                <X size={14} /> Reset
-              </button>
-            )}
-          </div>
         </div>
+      </div>
 
-        <div className="p-8 md:p-10 pt-0">
-          <div className="grid lg:grid-cols-12 gap-10">
-            <div className="lg:col-span-8 space-y-12">
+      <div className="p-8 md:p-10 pt-0">
+        <div className="grid lg:grid-cols-12 gap-10">
+          <div className="lg:col-span-8 space-y-12">
+            {/* Refined Filter Bar */}
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-6 py-4 px-6 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                  <Filter size={16} className="text-blue-600" />
+                  <span>Filter Roadmap</span>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-8">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Priority</span>
+                    <div className="flex bg-slate-50 rounded-xl p-1 border border-slate-100">
+                      {['All', 'High', 'Medium', 'Low'].map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setFilterPriority(p as any)}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                            filterPriority === p 
+                              ? 'bg-white text-blue-600 shadow-sm border border-slate-200' 
+                              : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          {p === 'High' && <div className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                          {p === 'Medium' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                          {p === 'Low' && <div className="w-1.5 h-1.5 rounded-full bg-green-500" />}
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</span>
+                    <div className="flex bg-slate-50 rounded-xl p-1 border border-slate-100">
+                      {['All', 'Pending', 'Completed'].map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => setFilterStatus(s as any)}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                            filterStatus === s 
+                              ? 'bg-white text-blue-600 shadow-sm border border-slate-200' 
+                              : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          {s === 'Completed' && <CheckCircle2 size={12} className="text-blue-600" />}
+                          {s === 'Pending' && <Circle size={12} className="text-slate-400" />}
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {isFiltered && (
+                  <button 
+                    onClick={() => { setFilterPriority('All'); setFilterStatus('All'); }}
+                    className="text-xs text-slate-400 hover:text-red-500 font-bold flex items-center gap-1 md:ml-auto transition-colors group"
+                  >
+                    <X size={14} className="group-hover:rotate-90 transition-transform" /> Clear Filters
+                  </button>
+                )}
+              </div>
+
               {project.phases.map((phase, phaseIndex) => {
                 // Filter logic
                 const visibleTasks = phase.tasks.filter(task => {
@@ -276,7 +363,15 @@ const ProjectDetails: React.FC = () => {
                       </div>
                     </div>
                     
-                    <div className="grid gap-4">
+                    <div 
+                      className="grid gap-4 min-h-[100px] p-2 -m-2 rounded-2xl transition-colors"
+                      onDragEnter={() => {
+                        if (phase.tasks.length === 0) {
+                          handleDragEnter(phaseIndex, 0);
+                        }
+                      }}
+                      onDragOver={(e) => e.preventDefault()}
+                    >
                       {visibleTasks.map((task, taskIndex) => (
                         <div 
                           key={task.id}
@@ -328,15 +423,44 @@ const ProjectDetails: React.FC = () => {
                                 <Calendar size={14} className="text-slate-300" /> {task.estimate}
                               </span>
                             </div>
+
+                            {task.dependencies && task.dependencies.length > 0 && (
+                              <div className="flex items-center gap-2 mt-3">
+                                <LinkIcon size={12} className="text-slate-400" />
+                                <div className="flex flex-wrap gap-1.5">
+                                  {task.dependencies.map(depId => {
+                                    const depTask = allTasks.find(t => t.id === depId);
+                                    if (!depTask) return null;
+                                    return (
+                                      <span key={depId} className={`text-[10px] px-2 py-0.5 rounded border flex items-center gap-1 truncate max-w-[150px] ${
+                                        depTask.completed ? 'bg-green-50 text-green-600 border-green-100' : 'bg-slate-50 text-slate-500 border-slate-200'
+                                      }`}>
+                                        {depTask.completed ? <CheckCircle2 size={10} /> : <Lock size={10} />}
+                                        {depTask.title}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
                           </div>
                           
-                           <button 
-                            onClick={(e) => deleteTask(phase.id, task.id, e)}
-                            className="p-2 text-slate-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
-                            title="Delete task"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                          <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setEditingTask({ phaseId: phase.id, task }); }}
+                              className="p-2 text-slate-300 hover:text-blue-500 rounded-lg hover:bg-blue-50 transition-all"
+                              title="Edit task"
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                            <button 
+                              onClick={(e) => deleteTask(phase.id, task.id, e)}
+                              className="p-2 text-slate-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition-all"
+                              title="Delete task"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
                       ))}
 
@@ -404,16 +528,123 @@ const ProjectDetails: React.FC = () => {
 
             <div className="lg:col-span-4 space-y-8">
               <div className="bg-slate-900 rounded-3xl p-8 text-white shadow-2xl sticky top-8 border-4 border-slate-800">
-                 <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                   <AlertTriangle size={16} /> Risk Mitigation Radar
-                 </h3>
-                 <ul className="space-y-6">
-                   {project.risks.map((risk, i) => (
-                     <li key={i} className="flex gap-4 text-sm font-medium leading-relaxed group">
-                       <span className="h-6 w-6 rounded-lg bg-slate-800 flex items-center justify-center text-xs text-slate-500 group-hover:text-blue-400 transition-colors">{i+1}</span>
-                       <span className="text-slate-300">{risk}</span>
-                     </li>
-                   ))}
+                 <div className="flex items-center justify-between mb-6">
+                   <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
+                     <AlertTriangle size={16} /> Risk Mitigation Radar
+                   </h3>
+                   <button 
+                     onClick={() => setAddingRisk(!addingRisk)}
+                     className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+                   >
+                     {addingRisk ? <X size={14} /> : <Plus size={14} />}
+                   </button>
+                 </div>
+
+                 {addingRisk && (
+                   <div className="mb-6 bg-slate-800 rounded-2xl p-4 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                     <div className="space-y-1">
+                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</label>
+                       <input 
+                         type="text"
+                         value={newRiskForm.description}
+                         onChange={e => setNewRiskForm({...newRiskForm, description: e.target.value})}
+                         className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                         placeholder="What is the risk?"
+                       />
+                     </div>
+                     <div className="grid grid-cols-2 gap-3">
+                       <div className="space-y-1">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Severity</label>
+                         <select 
+                           value={newRiskForm.severity}
+                           onChange={e => setNewRiskForm({...newRiskForm, severity: e.target.value as any})}
+                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                         >
+                           <option value="Low">Low</option>
+                           <option value="Medium">Medium</option>
+                           <option value="High">High</option>
+                           <option value="Critical">Critical</option>
+                         </select>
+                       </div>
+                       <div className="space-y-1">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Likelihood</label>
+                         <select 
+                           value={newRiskForm.likelihood}
+                           onChange={e => setNewRiskForm({...newRiskForm, likelihood: e.target.value as any})}
+                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                         >
+                           <option value="Low">Low</option>
+                           <option value="Medium">Medium</option>
+                           <option value="High">High</option>
+                         </select>
+                       </div>
+                     </div>
+                     <div className="space-y-1">
+                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mitigation (Optional)</label>
+                       <textarea 
+                         value={newRiskForm.mitigation}
+                         onChange={e => setNewRiskForm({...newRiskForm, mitigation: e.target.value})}
+                         className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none resize-none h-16"
+                         placeholder="How to prevent or handle it?"
+                       />
+                     </div>
+                     <button 
+                       onClick={handleAddRisk}
+                       className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition-colors"
+                     >
+                       Add Risk
+                     </button>
+                   </div>
+                 )}
+
+                 <ul className="space-y-4">
+                   {project.risks.map((risk, i) => {
+                     const isString = typeof risk === 'string';
+                     const description = isString ? risk : risk.description;
+                     const severity = isString ? 'Medium' : risk.severity;
+                     const likelihood = isString ? 'Medium' : risk.likelihood;
+                     const mitigation = isString ? '' : risk.mitigation;
+
+                     return (
+                       <li key={i} className="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50 hover:border-slate-600 transition-colors">
+                         <div className="flex items-start gap-3">
+                           <div className={`mt-0.5 w-2 h-2 rounded-full flex-none ${
+                             severity === 'Critical' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' :
+                             severity === 'High' ? 'bg-orange-500' :
+                             severity === 'Medium' ? 'bg-amber-500' :
+                             'bg-green-500'
+                           }`} />
+                           <div className="flex-1 min-w-0">
+                             <p className="text-sm font-medium text-slate-200 leading-snug">{description}</p>
+                             
+                             {!isString && (
+                               <div className="mt-3 space-y-2">
+                                 <div className="flex flex-wrap gap-2">
+                                   <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold uppercase tracking-wider border border-slate-700">
+                                     Severity: <span className={
+                                       severity === 'Critical' ? 'text-red-400' :
+                                       severity === 'High' ? 'text-orange-400' :
+                                       severity === 'Medium' ? 'text-amber-400' :
+                                       'text-green-400'
+                                     }>{severity}</span>
+                                   </span>
+                                   <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold uppercase tracking-wider border border-slate-700">
+                                     Likelihood: <span className="text-slate-300">{likelihood}</span>
+                                   </span>
+                                 </div>
+                                 {mitigation && (
+                                   <div className="text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                                     <span className="font-bold text-slate-500 block mb-0.5">Mitigation:</span>
+                                     {mitigation}
+                                   </div>
+                                 )}
+                               </div>
+                             )}
+                           </div>
+                         </div>
+                       </li>
+                     );
+                   })}
                  </ul>
 
                  <div className="mt-12 pt-8 border-t border-slate-800">
@@ -478,6 +709,173 @@ const ProjectDetails: React.FC = () => {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Task Edit Modal */}
+      {editingTask && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white rounded-[32px] shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 flex-none">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Edit Task</h3>
+              </div>
+              <button 
+                onClick={() => setEditingTask(null)} 
+                className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl shadow-sm hover:shadow transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Task Title</label>
+                  <input
+                    type="text"
+                    value={editingTask.task.title}
+                    onChange={(e) => setEditingTask({ ...editingTask, task: { ...editingTask.task, title: e.target.value } })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-900"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Description</label>
+                  <textarea
+                    value={editingTask.task.description}
+                    onChange={(e) => setEditingTask({ ...editingTask, task: { ...editingTask.task, description: e.target.value } })}
+                    className="w-full h-24 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none text-sm text-slate-600"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Estimate</label>
+                    <input
+                      type="text"
+                      value={editingTask.task.estimate}
+                      onChange={(e) => setEditingTask({ ...editingTask, task: { ...editingTask.task, estimate: e.target.value } })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm text-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Priority</label>
+                    <select
+                      value={editingTask.task.priority}
+                      onChange={(e) => setEditingTask({ ...editingTask, task: { ...editingTask.task, priority: e.target.value as Priority } })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm text-slate-900"
+                    >
+                      <option value={Priority.HIGH}>High</option>
+                      <option value={Priority.MEDIUM}>Medium</option>
+                      <option value={Priority.LOW}>Low</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Dependencies (Must be completed first)</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 max-h-48 overflow-y-auto space-y-2">
+                    {allTasks.filter(t => t.id !== editingTask.task.id).map(t => {
+                      const isSelected = editingTask.task.dependencies?.includes(t.id);
+                      return (
+                        <label key={t.id} className="flex items-center gap-3 p-2 hover:bg-white rounded-lg cursor-pointer transition-colors border border-transparent hover:border-slate-200">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected || false}
+                            onChange={(e) => {
+                              const currentDeps = editingTask.task.dependencies || [];
+                              const newDeps = e.target.checked 
+                                ? [...currentDeps, t.id]
+                                : currentDeps.filter(id => id !== t.id);
+                              setEditingTask({ ...editingTask, task: { ...editingTask.task, dependencies: newDeps } });
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-700">{t.title}</span>
+                            <span className="text-xs text-slate-400 truncate max-w-[400px]">{t.description}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                    {allTasks.length <= 1 && (
+                      <p className="text-sm text-slate-500 italic">No other tasks available to set as dependencies.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 flex-none">
+              <Button variant="ghost" onClick={() => setEditingTask(null)}>Cancel</Button>
+              <Button onClick={() => {
+                const updatedPhases = project.phases.map(p => {
+                  if (p.id !== editingTask.phaseId) return p;
+                  return {
+                    ...p,
+                    tasks: p.tasks.map(t => t.id === editingTask.task.id ? editingTask.task : t)
+                  };
+                });
+                saveProjectToStore({ ...project, phases: updatedPhases });
+                setEditingTask(null);
+              }}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Dependency Graph Modal */}
+      {showDependencyGraph && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white rounded-[32px] shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 flex-none">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Dependency Graph</h3>
+                <p className="text-slate-500 text-sm">Visual representation of task relationships.</p>
+              </div>
+              <button 
+                onClick={() => setShowDependencyGraph(false)} 
+                className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl shadow-sm hover:shadow transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 overflow-y-auto flex-1 bg-slate-50">
+              {allTasks.filter(t => t.dependencies && t.dependencies.length > 0).length === 0 ? (
+                <div className="text-center py-12">
+                  <LinkIcon size={48} className="mx-auto text-slate-300 mb-4" />
+                  <h4 className="text-lg font-bold text-slate-700">No Dependencies Defined</h4>
+                  <p className="text-slate-500 mt-2">Edit tasks to add dependencies and they will appear here.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {allTasks.filter(t => t.dependencies && t.dependencies.length > 0).map(task => (
+                    <div key={task.id} className="flex items-center gap-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                      <div className="flex-1 flex flex-col items-end gap-3">
+                        {task.dependencies?.map(depId => {
+                          const dep = allTasks.find(t => t.id === depId);
+                          if (!dep) return null;
+                          return (
+                            <div key={depId} className={`px-4 py-2 rounded-xl border text-sm font-bold shadow-sm ${dep.completed ? 'bg-green-50 border-green-200 text-green-700' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                              {dep.title}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      
+                      <div className="flex-none flex flex-col items-center justify-center w-16">
+                        <div className="w-full h-0.5 bg-blue-200 relative">
+                          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 border-t-2 border-r-2 border-blue-400 rotate-45"></div>
+                        </div>
+                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-2 bg-blue-50 px-2 py-0.5 rounded-full">Blocks</span>
+                      </div>
+
+                      <div className="flex-1">
+                        <div className={`inline-block px-5 py-3 rounded-xl border-2 text-sm font-black shadow-md ${task.completed ? 'bg-slate-50 border-slate-200 text-slate-400' : 'bg-white border-blue-500 text-slate-900'}`}>
+                          {task.title}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
